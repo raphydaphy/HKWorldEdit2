@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using UnityEngine;
+using Hash128 = AssetsTools.NET.Hash128;
 
 namespace Assets.Bundler
 {
@@ -18,13 +20,11 @@ namespace Assets.Bundler
         public List<AssetsReplacer> assetReplacers;
         public List<AssetsReplacer> sceneMonoReplacers;
         private AssetsManager am;
-        private Random rand;
         private int sceneId;
         private int assetId;
         public ReferenceCrawler(AssetsManager am)
         {
             this.am = am;
-            rand = new Random();
             sceneId = 1;
             assetId = 1;
             references = new Dictionary<AssetID, AssetID>();
@@ -102,12 +102,12 @@ namespace Assets.Bundler
                         if (pathId == 0)
                             continue;
 
-                        AssetID aid = ConvertToAssetID(inst, fileId, pathId);
+                        AssetID aid = AssetID.FromPPtr(inst, fileId, pathId);
 
                         AssetsManager.AssetExternal ext = am.GetExtAsset(inst, fileId, pathId);
 
                         //not already visited and not a gameobject or monobehaviour
-                        if (references.ContainsKey(aid) || ext.info.curFileType == 0x01 || ext.info.curFileType == 0x72)
+                        if (references.ContainsKey(aid) || ext.info.curFileType == 0x01)// || ext.info.curFileType == 0x72)
                             continue;
 
                         AddReference(aid, IsAsset(ext.info));
@@ -136,6 +136,9 @@ namespace Assets.Bundler
                     //is a pptr
                     if (typeName.StartsWith("PPtr<") && typeName.EndsWith(">") && child.childrenCount == 2)
                     {
+                        if (typeName == "PPtr<MonoScript>")
+                            continue;
+
                         int fileId = child.Get("m_FileID").GetValue().AsInt();
                         long pathId = child.Get("m_PathID").GetValue().AsInt64();
 
@@ -143,7 +146,7 @@ namespace Assets.Bundler
                         if (pathId == 0)
                             continue;
 
-                        AssetID aid = ConvertToAssetID(inst, fileId, pathId);
+                        AssetID aid = AssetID.FromPPtr(inst, fileId, pathId);
                         //not already visited
                         if (references.ContainsKey(aid))
                         {
@@ -171,34 +174,48 @@ namespace Assets.Bundler
             }
         }
 
-        private AssetID ConvertToAssetID(AssetsFileInstance inst, int fileId, long pathId)
-        {
-            string fileName;
-            if (fileId == 0)
-                fileName = inst.path;
-            else
-                fileName = inst.dependencies[fileId - 1].path;
-            return new AssetID(fileName, pathId);
-        }
+        private void FixAsset(AssetsFileInstance inst, AssetTypeValueField field, AssetFileInfoEx inf) {
+            var type = field.GetFieldType();
+            if (type.Equals("MonoBehaviour")) {
+                // m_GameObject: PPtr<GameObject>
+                // m_Script PPtr<MonoScript>
+                var m_Script = field.Get("m_Script");
+                var m_GameObject = field.Get("m_GameObject");
 
-        private void FixAsset(AssetsFileInstance inst, AssetTypeValueField field, AssetFileInfoEx inf)
-        {
+                if (m_Script == null || m_GameObject == null) return;
+
+                AssetTypeValueField scriptBaseField = am.GetExtAsset(inst, m_Script).instance.GetBaseField();
+                AssetTypeValueField gameObjectBaseField = am.GetExtAsset(inst, m_GameObject).instance.GetBaseField();
+                
+                var className = scriptBaseField.Get("m_ClassName").GetValue();
+                var assemblyName = scriptBaseField.Get("m_AssemblyName").GetValue();
+                
+                if (assemblyName.AsString().Equals("Assembly-CSharp.dll")) {
+                    assemblyName.Set("HKCode.dll");
+                }
+
+                var gameObjectName = gameObjectBaseField.Get("m_Name").GetValue();
+                if (gameObjectName == null) return;
+                
+                //UnityEngine.Debug.Log("GameObject " + gameObjectName.AsString() + " has " + ConjugateMonoScript(assemblyName, className));
+            }
             if (inf.curFileType == 0x01) //fix gameobject
             {
-                AssetTypeValueField Array = field.Get("m_Component").Get("Array");
+                AssetTypeValueField ComponentArray = field.Get("m_Component").Get("Array");
+
                 //remove all null pointers
-                List<AssetTypeValueField> newFields = Array.pChildren.Where(f =>
+                List<AssetTypeValueField> newFields = ComponentArray.pChildren.Where(f =>
                     f.pChildren[0].pChildren[1].GetValue().AsInt64() != 0
                 ).ToList();
 
                 //add editdiffer monobehaviour
                 newFields.Add(CreatePPtrField(0, sceneId)); //this will be pathId that the below will go into
-                AssetID aid = ConvertToAssetID(inst, 0, (long)inf.index);
-                AddReplacer(CreateEditDifferMonoBehaviour(references[aid].pathId, Array, aid, rand), 0x72, 0x0000, false);
+                AssetID aid = AssetID.FromPPtr(inst, 0, (long)inf.index);
+                AddReplacer(CreateEditDifferMonoBehaviour(references[aid].pathId, inst, ComponentArray, aid), 0x72, 0x0000, false);
 
                 uint newSize = (uint)newFields.Count;
-                Array.SetChildrenList(newFields.ToArray(), newSize);
-                Array.GetValue().Set(new AssetTypeArray() { size = newSize });
+                ComponentArray.SetChildrenList(newFields.ToArray(), newSize);
+                ComponentArray.GetValue().Set(new AssetTypeArray() { size = newSize });
             }
             else if (inf.curFileType == 0x1c) //fix texture2d
             {
@@ -216,9 +233,38 @@ namespace Assets.Bundler
                 string fixedPath = Path.Combine(directory, pathString);
                 path.GetValue().Set(fixedPath);
             }
+            else if (inf.curFileType == 0x72)
+            {
+                AssetTypeValueField m_Script = field.Get("m_Script");
+                //convert scene pptrs to game ones
+                AssetTypeValueField scriptBaseField = am.GetExtAsset(inst, m_Script).instance.GetBaseField();
+                foreach (AssetTypeValueField v in scriptBaseField.pChildren) {
+                    var fieldName = v.templateField.name;
+                    if (fieldName != "m_ClassName" &&
+                        fieldName != "m_Namespace" && 
+                        fieldName != "m_AssemblyName" && 
+                        fieldName != "m_Name" && 
+                        fieldName != "m_ExecutionOrder" && 
+                        fieldName != "m_IsEditorScript" &&
+                        fieldName != "m_PropertiesHash") {
+                        UnityEngine.Debug.Log("(MonoScript Child) Type: " + v.templateField.type + " Name: " + fieldName);
+                    }
+                }
+                var className = scriptBaseField.Get("m_ClassName").GetValue();
+                var assemblyName = scriptBaseField.Get("m_AssemblyName").GetValue();
+                var propHash = scriptBaseField.Get("m_PropertiesHash");
+                if (assemblyName.AsString().Equals("Assembly-CSharp.dll")) {
+                    assemblyName.Set("HKCode.dll");
+                }
+                //UnityEngine.Debug.Log(ConjugateMonoScript(assemblyName, className));
+            }
         }
 
-        private byte[] CreateEditDifferMonoBehaviour(long goPid, AssetTypeValueField componentArray, AssetID origGoPptr, Random rand)
+        private string ConjugateMonoScript(AssetTypeValue assemblyName, AssetTypeValue className) {
+            return "MonoScript: " + assemblyName.AsString() + " / " + className.AsString();
+        }
+
+        private byte[] CreateEditDifferMonoBehaviour(long goPid, AssetsFileInstance inst, AssetTypeValueField componentArray, AssetID origGoPptr)
         {
             byte[] data;
             using (MemoryStream ms = new MemoryStream())
@@ -238,22 +284,27 @@ namespace Assets.Bundler
                 w.Write(origGoPptr.pathId);
                 w.Write(0);
 
-                uint componentArrayLength = componentArray.GetValue().AsArray().size;
-                w.Write(componentArrayLength);
-                for (uint i = 0; i < componentArrayLength; i++)
+                List<AssetID> filteredComponents = new List<AssetID>();
+                for (uint i = 0; i < componentArray.GetValue().AsArray().size; i++)
                 {
                     AssetTypeValueField component = componentArray[i].Get("component");
                     int m_FileID = component.Get("m_FileID").GetValue().AsInt();
                     long m_PathID = component.Get("m_PathID").GetValue().AsInt64();
-                    if (m_PathID == 0) //removed (monobehaviour)
-                        w.Write((long)-1);
-                    else if (m_FileID == 0) //correct file
-                        w.Write(m_PathID);
-                    else //another file (shouldn't happen?)
-                        w.Write((long)0);
+                    //convert scene pptrs to game ones
+                    AssetID id = new AssetID(SCENE_LEVEL_NAME, m_PathID);
+                    AssetID oldId = references.FirstOrDefault(r => r.Value.Equals(id)).Key;
+                    if (m_PathID != 0 && m_FileID == 0) //not removed (monobehaviour) and in the current file
+                        filteredComponents.Add(oldId);
+                }
+                w.Write(filteredComponents.Count);
+                foreach (AssetID id in filteredComponents)
+                {
+                    w.WriteCountStringInt32(id.fileName);
+                    w.Align();
+                    w.Write(id.pathId);
                 }
 
-                w.Write(0/*rand.Next()*/);
+                w.Write(0);
                 data = ms.ToArray();
             }
             return data;

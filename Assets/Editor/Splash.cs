@@ -2,20 +2,6 @@
 using UnityEditor;
 using UnityEngine;
 
-[InitializeOnLoad]
-public static class SplashStarter
-{
-    static SplashStarter()
-    {
-        EditorApplication.update += Startup;
-    }
-    static void Startup()
-    {
-        EditorApplication.update -= Startup;
-        Splash.Open();
-    }
-}
-
 public class Splash : EditorWindow
 {
     public static void Open()

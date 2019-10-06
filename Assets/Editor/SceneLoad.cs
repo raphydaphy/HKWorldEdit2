@@ -41,7 +41,7 @@ public class SceneLoad
 
             AssetDatabase.Refresh();
 
-            EditorSceneManager.OpenScene(localDestPath);
+           //EditorSceneManager.OpenScene(localDestPath);
         }
     }
 
@@ -111,6 +111,7 @@ public class SceneSelector : EditorWindow
         if (selected != -1)
         {
             int oldSelected = selected;
+            Debug.Log("Loading Scene # " + selected + " ( " + strings[selected] + " )");
             selected = -1; //prevent error loop
             string path = Path.Combine(gameDataPath, "level" + oldSelected);
             SceneLoad.OpenScene(path);

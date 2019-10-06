@@ -19,7 +19,7 @@ public class SceneSave
             EditorUtility.DisplayDialog("No scenes exist", "No preloaded scenes were found. Please load a scene first.", "Close");
             return;
         }
-        string scenePath = Path.GetFileNameWithoutExtension(SceneManager.GetActiveScene().path); //todo does name work
+        string scenePath = Path.GetFileNameWithoutExtension(UnityEngine.SceneManagement.SceneManager.GetActiveScene().path); //todo does name work
         string origPathPath = Path.Combine(dataPath, scenePath + ".metadata");
         if (!File.Exists(origPathPath))
         {

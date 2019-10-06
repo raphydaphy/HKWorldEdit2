@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEditor;
+using UnityEngine;
 
 namespace Assets.Bundler
 {
@@ -15,8 +16,7 @@ namespace Assets.Bundler
     {
         const string ver = "2017.4.10f1";
         const int hkweVersion = 1;
-        public static void GenerateLevelFiles(string levelPath)
-        {
+        public static void GenerateLevelFiles(string levelPath) {
             AssetsManager am = new AssetsManager();
             EditorUtility.DisplayProgressBar("HKEdit", "Loading class database...", 0f);
             am.LoadClassPackage("cldb.dat");
@@ -51,6 +51,7 @@ namespace Assets.Bundler
                 if (i % 100 == 0)
                     EditorUtility.DisplayProgressBar("HKEdit", "Recursing GameObject dependencies... (step 1/3)", (float)i / initialGameObjects.Count);
                 AssetFileInfoEx inf = initialGameObjects[i];
+
                 crawler.AddReference(new AssetID(inst.path, (long)inf.index), false);
                 crawler.FindReferences(inst, inf);
             }

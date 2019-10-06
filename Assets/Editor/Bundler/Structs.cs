@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using AssetsTools.NET.Extra;
 
 namespace Assets.Bundler
 {
@@ -37,6 +38,16 @@ namespace Assets.Bundler
         public override string ToString()
         {
             return fileName + " " + pathId.ToString();
+        }
+        
+        public static AssetID FromPPtr(AssetsFileInstance inst, int fileId, long pathId)
+        {
+            string fileName;
+            if (fileId == 0)
+                fileName = inst.path;
+            else
+                fileName = inst.dependencies[fileId - 1].path;
+            return new AssetID(fileName, pathId);
         }
     }
 
