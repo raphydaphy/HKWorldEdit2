@@ -177,27 +177,47 @@ namespace Assets.Bundler
         private void FixAsset(AssetsFileInstance inst, AssetTypeValueField field, AssetFileInfoEx inf) {
             var type = field.GetFieldType();
             if (type.Equals("MonoBehaviour")) {
-                // m_GameObject: PPtr<GameObject>
-                // m_Script PPtr<MonoScript>
-                var m_Script = field.Get("m_Script");
-                var m_GameObject = field.Get("m_GameObject");
+                try {
+                    var m_Script = field.Get("m_Script"); // m_Script PPtr<MonoScript>
+                    var m_GameObject = field.Get("m_GameObject"); // m_GameObject: PPtr<GameObject>
 
-                if (m_Script == null || m_GameObject == null) return;
+                    if (m_Script == null || m_GameObject == null) {
+                        Debug.LogWarning("Null m_Script or m_GameObject under MonoBehaviour!");
+                        return;
+                    }
 
-                AssetTypeValueField scriptBaseField = am.GetExtAsset(inst, m_Script).instance.GetBaseField();
-                AssetTypeValueField gameObjectBaseField = am.GetExtAsset(inst, m_GameObject).instance.GetBaseField();
-                
-                var className = scriptBaseField.Get("m_ClassName").GetValue();
-                var assemblyName = scriptBaseField.Get("m_AssemblyName").GetValue();
-                
-                if (assemblyName.AsString().Equals("Assembly-CSharp.dll")) {
-                    assemblyName.Set("HKCode.dll");
+                    var gameObjectFileID = m_GameObject.Get("m_FileID").GetValue();
+                    var gameObjectPathID = m_GameObject.Get("m_PathID").GetValue();
+
+                    //Debug.Log("GameObject File ID: " + gameObjectFileID.AsInt());
+                    //Debug.Log("GameObject Path ID: " + gameObjectPathID.AsInt64());
+
+                    var scriptAssetInstance = am.GetExtAsset(inst, m_Script).instance;
+                    var gameObjectAssetInstance = am.GetExtAsset(inst, m_GameObject).instance;
+
+                    if (scriptAssetInstance == null || gameObjectAssetInstance == null) {
+                        Debug.LogWarning("Null MonoScript or GameObject asset instance!");
+                        return;
+                    }
+
+                    var gameObjectBaseField = gameObjectAssetInstance.GetBaseField();
+                    var scriptBaseField = scriptAssetInstance.GetBaseField();
+
+                    var className = scriptBaseField.Get("m_ClassName").GetValue();
+                    var assemblyName = scriptBaseField.Get("m_AssemblyName").GetValue();
+
+                    if (assemblyName.AsString().Equals("Assembly-CSharp.dll")) {
+                        assemblyName.Set("HKCode.dll");
+                    }
+
+                    var gameObjectName = gameObjectBaseField.Get("m_Name").GetValue();
+                    if (gameObjectName == null) return;
+
+                    Debug.Log("GameObject " + gameObjectName.AsString() + " has " + ConjugateMonoScript(assemblyName, className));
                 }
-
-                var gameObjectName = gameObjectBaseField.Get("m_Name").GetValue();
-                if (gameObjectName == null) return;
-                
-                //UnityEngine.Debug.Log("GameObject " + gameObjectName.AsString() + " has " + ConjugateMonoScript(assemblyName, className));
+                catch (NullReferenceException e) {
+                    Debug.LogError(e.StackTrace);
+                }
             }
             if (inf.curFileType == 0x01) //fix gameobject
             {
